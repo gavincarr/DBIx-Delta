@@ -1,0 +1,3 @@
+- commenting out a statement (including semicolon) still causes a
+  split on that semicolon - to be robust we probably need to 
+  remove all comments once we've got the table and uuid stuff out
