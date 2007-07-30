@@ -2,4 +2,4 @@ Delta.pm
 Makefile.PL
 MANIFEST
 README
-t/01_base.t
+t/01_compile.t

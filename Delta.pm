@@ -12,7 +12,7 @@ use DBI;
 use strict;
 
 use vars qw($VERSION);
-$VERSION = 0.01;
+$VERSION = 0.2;
 
 # abstract connect() - should be overridden with a sub returning a valid $dbh
 sub connect
@@ -34,20 +34,22 @@ sub parse_args
     push @ARGV, @_ if @_;
 
     my %opts = ();
-    getopts('?dfhu',\%opts);
+    getopts('?dfhnu',\%opts);
 
     if ($opts{'?'} || $opts{h}) {
-      print "usage: " . basename($0) . " [-d] [-f] [-u] [<delta> ...]\n";
+      print "usage: " . basename($0) . " [-d] [-n] [-f] [-u] [<delta> ...]\n";
       exit 1;
     }
 
     $self->{debug} = $opts{d};
     $self->{force} = $opts{f} && @ARGV;
+    $self->{noop}  = $opts{n};
     $self->{update} = $opts{u};
 
     if ($self->{debug}) {
-        printf "+ debug: %s\n", $self->{debug};
-        printf "+ force: %s\n", $self->{force};
+        printf "+ debug: %s\n",  $self->{debug};
+        printf "+ force: %s\n",  $self->{force};
+        printf "+ noop: %s\n",   $self->{noop};
         printf "+ update: %s\n", $self->{update};
     }
 }
@@ -121,7 +123,8 @@ sub apply_deltas
     for my $d (@_) {
         my $delta = $self->{file}->{$d};
         # Escape semicolons inside single-quoted strings
-        do {} while $delta =~ s/('.*)(?<!\\);(.*')/$1\\;$2/gsm;
+        # TODO: the following is wrong - need to revisit
+#       do {} while $delta =~ s/('.*)(?<!\\);(.*')/$1\\;$2/gsm;
         # Split each file into a set of statements on (non-escaped) semicolons
         my @stmt = split /(?<!\\);/, $delta;
         # Skip everything after the last semicolon
@@ -131,18 +134,23 @@ sub apply_deltas
 
         # Execute the statements 
         for (my $i = 0; $i <= $#stmt; $i++) {
-            print "+ executing stmt $i ..." if $self->{debug};
+            print "+ executing stmt $i ... " if $self->{debug};
             # Unescape semicolons escaped above
             $stmt[$i] =~ s/\\;/;/g;
-            $dbh->do($stmt[$i])
-              or $self->_die("[$d] update failed: " . $dbh->errstr . 
-                "\ndoing: $stmt[$i]\n");
-            print " done\n" if $self->{debug};
+            if ($self->{noop}) {
+              print "\n\n[NOOP]\n$stmt[$i]\n\n";
+            }
+            else {
+              $dbh->do($stmt[$i])
+                or $self->_die("[$d] update failed: " . $dbh->errstr . 
+                  "\ndoing: $stmt[$i]\n");
+            }
+            print "done\n" if $self->{debug} && ! $self->{noop};
         }
 
         # Update the delta table
-        if ($self->{insert}->{$d}) {
-            print "+ inserting delta record ..." if $self->{debug};
+        if ($self->{insert}->{$d} && ! $self->{noop}) {
+            print "+ inserting delta record ... " if $self->{debug};
             my $sth = $dbh->prepare(qq(
                 insert into delta (delta_id, delta_tables) values (?, ?)
             ));
@@ -155,7 +163,7 @@ sub apply_deltas
             ) or $self->_die("delta insert execute failed: " . $dbh->errstr . 
                 "\n");
 
-            print " done\n" if $self->{debug};
+            print "done\n" if $self->{debug};
         }
     }
 
