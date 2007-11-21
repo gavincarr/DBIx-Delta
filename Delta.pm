@@ -202,7 +202,10 @@ sub run
 
     print $self->{update} ? "Applying deltas:\n" : "Outstanding deltas:\n"
         unless $self->{quiet};
-    print $self->{quiet} ? '' : '  ' . $_ . "\n" foreach @outstanding;
+    foreach (@outstanding) {
+      print $self->{quiet} ? '' : '  ';
+      print "$_\n";
+    }
 
     $self->apply_deltas(@outstanding) if $self->{update};
 
