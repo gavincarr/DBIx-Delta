@@ -12,7 +12,7 @@ use DBI;
 use strict;
 
 use vars qw($VERSION);
-$VERSION = 0.2;
+$VERSION = 0.3;
 
 # abstract connect() - should be overridden with a sub returning a valid $dbh
 sub connect
@@ -34,22 +34,24 @@ sub parse_args
     push @ARGV, @_ if @_;
 
     my %opts = ();
-    getopts('?dfhnu',\%opts);
+    getopts('?dfhntu',\%opts);
 
     if ($opts{'?'} || $opts{h}) {
-      print "usage: " . basename($0) . " [-d] [-n] [-f] [-u] [<delta> ...]\n";
+      print "usage: " . basename($0) . " [-d] [-n] [-t] [-f] [-u] [<delta> ...]\n";
       exit 1;
     }
 
-    $self->{debug} = $opts{d};
-    $self->{force} = $opts{f} && @ARGV;
-    $self->{noop}  = $opts{n};
+    $self->{debug}  = $opts{d};
+    $self->{force}  = $opts{f} && @ARGV;
+    $self->{noop}   = $opts{n};
+    $self->{test}   = $opts{t};
     $self->{update} = $opts{u};
 
     if ($self->{debug}) {
         printf "+ debug: %s\n",  $self->{debug};
         printf "+ force: %s\n",  $self->{force};
         printf "+ noop: %s\n",   $self->{noop};
+        printf "+ test: %s\n",   $self->{test};
         printf "+ update: %s\n", $self->{update};
     }
 }
@@ -123,14 +125,14 @@ sub apply_deltas
     for my $d (@_) {
         my $delta = $self->{file}->{$d};
         # Escape semicolons inside single-quoted strings
-        # TODO: the following is wrong - need to revisit
-#       do {} while $delta =~ s/('.*)(?<!\\);(.*')/$1\\;$2/gsm;
+        do {} while $delta =~ s/('[^']*)(?<!\\);([^']*')/$1\\;$2/gsm;
         # Split each file into a set of statements on (non-escaped) semicolons
         my @stmt = split /(?<!\\);/, $delta;
         # Skip everything after the last semicolon
         pop @stmt if @stmt > 1;
-        printf "+ %s: %d statement(s) found, updating ...\n", $d, scalar(@stmt)
-            if $self->{debug};
+        $self->{stmt}->{$d} = \@stmt if $self->{test};
+        printf "+ [%s] %d statement(s) found:\n+   %s\n\n", 
+            $d, scalar(@stmt), join("\n+   ", @stmt) if $self->{debug};
 
         # Execute the statements 
         for (my $i = 0; $i <= $#stmt; $i++) {
@@ -145,7 +147,7 @@ sub apply_deltas
                 or $self->_die("[$d] update failed: " . $dbh->errstr . 
                   "\ndoing: $stmt[$i]\n");
             }
-            print "done\n" if $self->{debug} && ! $self->{noop};
+            print "+ done\n" if $self->{debug} && ! $self->{noop};
         }
 
         # Update the delta table
