@@ -12,7 +12,7 @@ use DBI;
 use strict;
 
 use vars qw($VERSION);
-$VERSION = 0.3;
+$VERSION = '0.3.1';
 
 # abstract connect() - should be overridden with a sub returning a valid $dbh
 sub connect
@@ -34,16 +34,17 @@ sub parse_args
     push @ARGV, @_ if @_;
 
     my %opts = ();
-    getopts('?dfhntu',\%opts);
+    getopts('?dfhnqtu',\%opts);
 
     if ($opts{'?'} || $opts{h}) {
-      print "usage: " . basename($0) . " [-d] [-n] [-t] [-f] [-u] [<delta> ...]\n";
+      print "usage: " . basename($0) . " [-q] [-d] [-n] [-t] [-f] [-u] [<delta> ...]\n";
       exit 1;
     }
 
     $self->{debug}  = $opts{d};
     $self->{force}  = $opts{f} && @ARGV;
     $self->{noop}   = $opts{n};
+    $self->{quiet}  = $opts{q};
     $self->{test}   = $opts{t};
     $self->{update} = $opts{u};
 
@@ -51,6 +52,7 @@ sub parse_args
         printf "+ debug: %s\n",  $self->{debug};
         printf "+ force: %s\n",  $self->{force};
         printf "+ noop: %s\n",   $self->{noop};
+        printf "+ quiet: %s\n",  $self->{quiet};
         printf "+ test: %s\n",   $self->{test};
         printf "+ update: %s\n", $self->{update};
     }
@@ -198,8 +200,9 @@ sub run
         exit 1;
     }
 
-    print $self->{update} ? "Applying deltas:\n" : "Outstanding deltas:\n";
-    print "  $_\n" foreach @outstanding;
+    print $self->{update} ? "Applying deltas:\n" : "Outstanding deltas:\n"
+        unless $self->{quiet};
+    print $self->{quiet} ? '' : '  ' . $_ . "\n" foreach @outstanding;
 
     $self->apply_deltas(@outstanding) if $self->{update};
 
