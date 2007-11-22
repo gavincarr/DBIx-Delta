@@ -12,7 +12,7 @@ use DBI;
 use strict;
 
 use vars qw($VERSION);
-$VERSION = '0.3.1';
+$VERSION = '0.4';
 
 # abstract connect() - should be overridden with a sub returning a valid $dbh
 sub connect
@@ -23,50 +23,60 @@ sub connect
 sub _die
 {
     my $self = shift;
-    $self->{dbh}->disconnect;
+    $self->_disconnect;
     die join ' ', @_;
+}
+
+sub _disconnect 
+{
+    my $self = shift;
+    $self->{dbh}->disconnect;           # unless $self->{test_mode};
 }
 
 # Parse arguments
 sub parse_args
 {
     my $self = shift;
-    push @ARGV, @_ if @_;
+    @ARGV = @_ if @_;
 
     my %opts = ();
-    getopts('?dfhnqtu',\%opts);
+    getopts('?bdfhnqtu',\%opts);
 
     if ($opts{'?'} || $opts{h}) {
-      print "usage: " . basename($0) . " [-q] [-d] [-n] [-t] [-f] [-u] [<delta> ...]\n";
+      print "usage: " . basename($0) . " [-qbd] [-n] [-f] [-u] [<delta> ...]\n";
       exit 1;
     }
 
-    $self->{debug}  = $opts{d};
-    $self->{force}  = $opts{f} && @ARGV;
-    $self->{noop}   = $opts{n};
-    $self->{quiet}  = $opts{q};
-    $self->{test}   = $opts{t};
-    $self->{update} = $opts{u};
+    $self->{brief}      = $opts{b} || '';
+    $self->{debug}      = $opts{d} || '';
+    $self->{force}      = $opts{f} && @ARGV ? $opts{f} : '';
+    $self->{noop}       = $opts{n} || '';
+    $self->{quiet}      = $opts{q} || '';
+    $self->{test_mode}  = $opts{t} || '';
+    $self->{update}     = $opts{u} || '';
 
     if ($self->{debug}) {
+        printf "+ brief: %s\n",  $self->{brief};
         printf "+ debug: %s\n",  $self->{debug};
         printf "+ force: %s\n",  $self->{force};
         printf "+ noop: %s\n",   $self->{noop};
         printf "+ quiet: %s\n",  $self->{quiet};
-        printf "+ test: %s\n",   $self->{test};
+        printf "+ test: %s\n",   $self->{test_mode};
         printf "+ update: %s\n", $self->{update};
     }
+
+    return @ARGV;
 }
 
 # Find outstanding deltas
 sub find_deltas
 {
     my $self = shift;
+    my @delta = @_;
 
-    my @delta = @ARGV;
     @delta = <20*.sql> unless @delta;
     unless (@delta) {
-      $self->{dbh}->disconnect;
+      $self->_disconnect;
       print ("No deltas found (pattern '20*sql') - exiting.\n");
       exit 0;
     }
@@ -78,7 +88,7 @@ sub find_deltas
     $self->{tables} = {};
     $self->{insert} = {};
     for my $d (@delta) {
-        my $fh = IO::File->new($d, 'r');
+        my $fh = IO::File->new($d, 'r') or $self->_die("cannot open delta '$d': $!");
         my $file;
         if (defined $fh) {
             local $/ = undef;
@@ -101,6 +111,9 @@ sub find_deltas
                     $table =~ s!\s+\*/.*!!;
                     push @outstanding, $d;
                     $self->{tag}->{$d} = $tag;
+                    $file =~ s/^--[^\n]*\n/\n/mg;
+                    $file =~ s/^\s*\n+//;
+                    $file =~ s/\n\s*\n+/\n/g;
                     $self->{file}->{$d} = $file;
                     $self->{tables}->{$d} = $table;
                     $self->{insert}->{$d} = 1 unless ref $row;
@@ -127,14 +140,22 @@ sub apply_deltas
     for my $d (@_) {
         my $delta = $self->{file}->{$d};
         # Escape semicolons inside single-quoted strings
-        do {} while $delta =~ s/('[^']*)(?<!\\);([^']*')/$1\\;$2/gsm;
+        my @bits = split /(?<!\\)'/, $delta;
+        printf "+ delta split into %d bits\n", scalar(@bits) if $self->{debug};
+        for (my $i = 1; $i <= $#bits; $i += 2) {
+            print "+ checking string '$bits[$i]' for semi-colons\n" if $self->{debug};
+            $bits[$i] =~ s/(?<!\\);/\\;/g;
+            print "+ munged string: '$bits[$i]'\n" if $self->{debug};
+        }
+        $delta = join("'", @bits);
+#       do {} while $delta =~ s/\G([^']*'[^']*)(?<!\\);([^']*')/$1\\;$2/gsm;
         # Split each file into a set of statements on (non-escaped) semicolons
         my @stmt = split /(?<!\\);/, $delta;
         # Skip everything after the last semicolon
         pop @stmt if @stmt > 1;
-        $self->{stmt}->{$d} = \@stmt if $self->{test};
-        printf "+ [%s] %d statement(s) found:\n+   %s\n\n", 
-            $d, scalar(@stmt), join("\n+   ", @stmt) if $self->{debug};
+        $self->{stmt}->{$d} = \@stmt if $self->{test_mode};
+        printf "+ [%s] %d statement(s) found:\n---\n%s\n---\n", 
+            $d, scalar(@stmt), join("\n---", @stmt) if $self->{debug};
 
         # Execute the statements 
         for (my $i = 0; $i <= $#stmt; $i++) {
@@ -171,7 +192,9 @@ sub apply_deltas
         }
     }
 
-    print "All done.\n";
+    print "All done.\n" unless $self->{quiet};
+
+    return @_;
 }
 
 # Main method
@@ -181,35 +204,45 @@ sub run
     my $self = bless {}, $class;
 
     # Parse arguments
-    $self->parse_args(@_);
+    my @args = @_;
+    unless (@args) {
+      @args = @ARGV;
+      @ARGV = ();
+    }
+    @args = $self->parse_args(@args);
 
     # Connect to db
     $self->{dbh} = $self->connect;
     die "invalid dbh handle" unless ref $self->{dbh};
 
     # Find outstanding deltas
-    my @outstanding = $self->find_deltas;
+    my @outstanding = $self->find_deltas(@args);
     if (! @outstanding) {
-        if (@ARGV) {
-            print "$_ already applied.\n" for @ARGV;
+        if (@args) {
+            print "$_ already applied.\n" for @args;
         }
         else {
             print "No outstanding deltas found.\n";
         }
-        $self->{dbh}->disconnect;
-        exit 1;
+        $self->_disconnect;
+        return 0;
     }
 
-    print $self->{update} ? "Applying deltas:\n" : "Outstanding deltas:\n"
-        unless $self->{quiet};
-    foreach (@outstanding) {
-      print $self->{quiet} ? '' : '  ';
-      print "$_\n";
+    my @return = @outstanding;
+
+    unless ($self->{quiet}) {
+      print $self->{update} ? "Applying deltas:\n" : "Outstanding deltas:\n" unless $self->{brief};
+      foreach (@outstanding) {
+        print $self->{brief} ? '' : '  ';
+        print "$_\n";
+      }
     }
 
-    $self->apply_deltas(@outstanding) if $self->{update};
+    @return = $self->apply_deltas(@outstanding) if $self->{update};
 
-    $self->{dbh}->disconnect;
+    $self->_disconnect;
+
+    return wantarray ? ( scalar(@return), \@return ) : scalar (@return);
 }
 
 1;
