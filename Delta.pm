@@ -6,13 +6,12 @@ package DBIx::Delta;
 
 use Getopt::Std;
 use File::Basename;
-use POSIX qw(strftime);
 use IO::File;
 use DBI;
 use strict;
 
 use vars qw($VERSION);
-$VERSION = '0.4';
+$VERSION = '0.5';
 
 # abstract connect() - should be overridden with a sub returning a valid $dbh
 sub connect
@@ -31,6 +30,15 @@ sub _disconnect
 {
     my $self = shift;
     $self->{dbh}->disconnect;           # unless $self->{test_mode};
+}
+
+# For subclassing to localise statements e.g. mysql grants in dev might need to
+#   use different IP addresses in production
+#   e.g. s/^\s* (grant\b.*?) localhost /${1}192.168.0.1/ 
+sub filter_statement
+{
+    my $self = shift;
+    shift;
 }
 
 # Parse arguments
@@ -162,13 +170,13 @@ sub apply_deltas
             print "+ executing stmt $i ... " if $self->{debug};
             # Unescape semicolons escaped above
             $stmt[$i] =~ s/\\;/;/g;
+            my $st = $self->filter_statement( $stmt[$i] );
             if ($self->{noop}) {
-              print "\n\n[NOOP]\n$stmt[$i]\n\n";
+              print "\n\n[NOOP]\n$st\n\n";
             }
             else {
-              $dbh->do($stmt[$i])
-                or $self->_die("[$d] update failed: " . $dbh->errstr . 
-                  "\ndoing: $stmt[$i]\n");
+              $dbh->do($st)
+                or $self->_die("[$d] update failed: " . $dbh->errstr . "\ndoing: $st\n");
             }
             print "+ done\n" if $self->{debug} && ! $self->{noop};
         }
@@ -302,13 +310,13 @@ in 'tag' e.g. 'tag', 'delta-tag' etc.; the second is a description of the
 tables affected by this delta, whose key should be 'table' or 'tables'
 'tables' e.g.
 
-    -- table: listing
     -- tag: 666da042-676e-4026-9862-6e7e0a1d3fa0
+    -- table: listing
 
 or:
 
-    -- tables: emp, emp_address
     -- delta-tag: 7ae84801-e323-4a6f-984e-6de4f939a12c
+    -- tables: emp, emp_address
 
 DBIx::Delta tracks uses the tag identifier to track which delta files 
 have been applied by inserting a record into a special 'delta' table 
@@ -350,9 +358,9 @@ and similarly, for mysql or postgresql:
 
 Gavin Carr <gavin@openfusion.com.au>
 
-=head1 COPYRIGHT
+=head1 LICENCE
 
-Copyright 2005-2007, Open Fusion Pty. Ltd. All Rights Reserved.
+Copyright 2005-2008, Gavin Carr.
 
 This program is free software. You may copy or redistribute it under the 
 same terms as perl itself.

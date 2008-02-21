@@ -1,13 +1,19 @@
-use 5.006;
-use ExtUtils::MakeMaker;
-# See lib/ExtUtils/MakeMaker.pm for details of how to influence
-# the contents of the Makefile that is written.
-WriteMakefile(
-    'NAME'		=> 'DBIx::Delta',
-    'VERSION_FROM'	=> 'Delta.pm', # finds $VERSION
-    'PREREQ_PM'		=> {
-        DBI => 1,
-    },
-    ($] >= 5.005 ?    ## Add these new keywords supported since 5.005
-      (AUTHOR     => 'Gavin Carr <gavin@openfusion.com.au>') : ()),
-);
+# Load the Module::Install bundled in ./inc/
+use inc::Module::Install;
+
+# Define metadata
+name            'DBIx-Delta';
+all_from        'Delta.pm';
+
+# Specific dependencies
+requires        'DBI'               => 0;
+build_requires  'Test::More'        => '0.42';
+#recommends      'Your::OtherModule' => '0.01';
+
+#no_index        'directory'         => 'demos';
+
+#install_script  'bin/myscript';
+
+auto_install;
+WriteAll;
+
