@@ -354,6 +354,31 @@ and similarly, for mysql or postgresql:
     perl -MFoo::Delta -le 'Foo::Delta->run'
 
 
+=head2 STATEMENT FILTERING
+
+As of version 0.5 DBIx::Delta supports statement filtering, allowing 
+subclasses to do arbitrary munging of statements before they're applied.
+This is done by overriding the filter_statement method in your subclass:
+
+    sub filter_statement {
+      my ($self, $statement) = @_;
+
+      # Munge $statement
+
+      return $statement;
+    }
+
+This can be useful, for instance, if you're doing IP-based grants in your
+deltas, and need to use different addresses for your different environments.
+For instance, you could use the following grant in your delta (mysql syntax):
+
+    grant all on db.table to user@localhost;
+
+and then modify it in your production DBIx::Delta subclass by doing:
+
+    $statement =~ s/^(grant.*)localhost/${1}192.168.0.10/;
+
+
 =head1 AUTHOR
 
 Gavin Carr <gavin@openfusion.com.au>
