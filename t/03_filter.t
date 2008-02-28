@@ -14,7 +14,7 @@ SKIP: {
   skip "no DBD::SQLite", $test_count unless eval { require DBD::SQLite };
 
   my $testdir = File::Spec->rel2abs( File::Spec->catdir( dirname($0), 't' . basename($0) ) );
-  $testdir =~ s/\..*?$//;
+  $testdir =~ s/\.t$//;
   die "cannot find testdir '$testdir'" unless -d $testdir;
 
   my $db = "$testdir/delta.db";
