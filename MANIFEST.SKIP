@@ -1,0 +1,5 @@
+.bzr
+EXCLUDE
+MANIFEST.bak
+Makefile$
+Makefile.old
