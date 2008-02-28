@@ -1,7 +1,8 @@
 
 my $test_count;
-BEGIN { $test_count = 14 }
+BEGIN { $test_count = 9 }
 
+use strict;
 use File::Basename;
 use File::Spec;
 use Test::More tests => $test_count;
@@ -28,39 +29,24 @@ SKIP: {
   ok($dbh->do("create table delta ( delta_id text primary key, delta_tables text not null, delta_apply_ts timestamp default CURRENT_TIMESTAMP )"), 'create delta table ok');
 
   ok(chdir("$testdir/delta"), "chdir to $testdir/delta ok");
-  my ($count, $delta, $update);
+  my ($count, $delta, $statements, $expected);
 
   # Check deltas to apply
   ($count, $delta) = TestDelta->run('-q');
   is($count, 2, "found 2 deltas to apply");
 
   # Apply first
-  ($count, $update) = TestDelta->run('-qu', $delta->[0]);
-  is($count, 1, "1 delta applied ok");
-  is($update->[0], $delta->[0], "delta applied is '$update->[0]'");
+  ($count, $statements) = TestDelta->run('-qs', $delta->[0]);
+  is($count, 3, "3 statements applied");
+  $expected = LoadFile('../expected/aa.yml');
+  cmp_deeply($statements, $expected, 'aa statements');
 
-  # Check database
-  # Why does this fail unless I reconnect???
-  ok($dbh = DBI->connect("dbi:SQLite:$db", '', ''), 'dbh reconnect ok');
-  my $data = $dbh->selectall_arrayref(q(select * from aa order by id)); 
-  my $expected = LoadFile('../expected/aa.yml');
-  cmp_deeply($data, $expected, 'aa table data ok');
-
-  # Check deltas to apply
-  $count = TestDelta->run('-q');
-  is($count, 1, "found 1 delta to apply");
-
-  # Apply rest
-  ($count, $update) = TestDelta->run('-qu');
-  is($count, 1, "1 delta applied ok");
-  is($update->[0], $delta->[1], "delta applied is '$update->[0]'");
-
-  # Check database
-  # Why does this fail unless I reconnect???
-  ok($dbh = DBI->connect("dbi:SQLite:$db", '', ''), 'dbh reconnect ok');
-  $data = $dbh->selectall_arrayref(q(select * from bb order by id)); 
+  # Apply second
+  ($count, $statements) = TestDelta->run('-qs', $delta->[1]);
+  is($count, 6, "6 statements applied");
   $expected = LoadFile('../expected/bb.yml');
-  cmp_deeply($data, $expected, 'bb table data ok');
+  cmp_deeply($statements, $expected, 'bb statements');
+# print Dump $statements;
 
   # Cleanup
   $dbh->disconnect;

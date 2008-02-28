@@ -11,7 +11,7 @@ use DBI;
 use strict;
 
 use vars qw($VERSION);
-$VERSION = '0.5';
+$VERSION = '0.6';
 
 # abstract connect() - should be overridden with a sub returning a valid $dbh
 sub connect
@@ -34,7 +34,7 @@ sub _disconnect
 
 # For subclassing to localise statements e.g. mysql grants in dev might need to
 #   use different IP addresses in production
-#   e.g. s/^\s* (grant\b.*?) localhost /${1}192.168.0.1/ 
+#   e.g. s/^\s* (grant\b.*?) localhost /${1}192.168.0.1/x
 sub filter_statement
 {
     my $self = shift;
@@ -48,10 +48,10 @@ sub parse_args
     @ARGV = @_ if @_;
 
     my %opts = ();
-    getopts('?bdfhnqtu',\%opts);
+    getopts('?bdfhnqsu',\%opts);
 
     if ($opts{'?'} || $opts{h}) {
-      print "usage: " . basename($0) . " [-qbd] [-n] [-f] [-u] [<delta> ...]\n";
+      print "usage: " . basename($0) . " [-qbd] [-n] [-f] [-s|-u] [<delta> ...]\n";
       exit 1;
     }
 
@@ -60,7 +60,7 @@ sub parse_args
     $self->{force}      = $opts{f} && @ARGV ? $opts{f} : '';
     $self->{noop}       = $opts{n} || '';
     $self->{quiet}      = $opts{q} || '';
-    $self->{test_mode}  = $opts{t} || '';
+    $self->{statements} = $opts{s} || '';
     $self->{update}     = $opts{u} || '';
 
     if ($self->{debug}) {
@@ -69,7 +69,7 @@ sub parse_args
         printf "+ force: %s\n",  $self->{force};
         printf "+ noop: %s\n",   $self->{noop};
         printf "+ quiet: %s\n",  $self->{quiet};
-        printf "+ test: %s\n",   $self->{test_mode};
+        printf "+ statements: %s\n", $self->{statements};
         printf "+ update: %s\n", $self->{update};
     }
 
@@ -144,6 +144,7 @@ sub apply_deltas
 {
     my $self = shift;
     my $dbh = $self->{dbh};
+    my @st = ();
 
     for my $d (@_) {
         my $delta = $self->{file}->{$d};
@@ -170,11 +171,14 @@ sub apply_deltas
             print "+ executing stmt $i ... " if $self->{debug};
             # Unescape semicolons escaped above
             $stmt[$i] =~ s/\\;/;/g;
+            # Trim leading whitespace
+            $stmt[$i] =~ s/^\s+//;
             my $st = $self->filter_statement( $stmt[$i] );
+            push @st, $st if $self->{statements};
             if ($self->{noop}) {
               print "\n\n[NOOP]\n$st\n\n";
             }
-            else {
+            elsif ($self->{update}) {
               $dbh->do($st)
                 or $self->_die("[$d] update failed: " . $dbh->errstr . "\ndoing: $st\n");
             }
@@ -182,7 +186,7 @@ sub apply_deltas
         }
 
         # Update the delta table
-        if ($self->{insert}->{$d} && ! $self->{noop}) {
+        if ($self->{insert}->{$d} && $self->{update} && ! $self->{noop}) {
             print "+ inserting delta record ... " if $self->{debug};
             my $sth = $dbh->prepare(qq(
                 insert into delta (delta_id, delta_tables) values (?, ?)
@@ -202,7 +206,7 @@ sub apply_deltas
 
     print "All done.\n" unless $self->{quiet};
 
-    return @_;
+    return $self->{statements} ? @st : @_;
 }
 
 # Main method
@@ -246,7 +250,8 @@ sub run
       }
     }
 
-    @return = $self->apply_deltas(@outstanding) if $self->{update};
+    @return = $self->apply_deltas(@outstanding) 
+      if $self->{update} || $self->{statements};
 
     $self->_disconnect;
 
