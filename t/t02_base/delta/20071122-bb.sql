@@ -11,6 +11,3 @@ insert into bb values ( 2, 'bb2''bb2' );
 insert into bb values ( 4, 'bb4;bb4' );
 insert into bb values ( 5, 'bb5' );
 
--- table: bb
--- delta-tag: aa6f727f-0731-421d-82cd-5d35839c5877
-
