@@ -4,14 +4,17 @@
 
 package DBIx::Delta;
 
-use Getopt::Std;
-use File::Basename;
-use IO::File;
-use DBI;
 use strict;
+use FindBin qw($Bin);
+use File::Basename;
+use Getopt::Std;
+use File::Path qw(make_path);
+use IO::File;
+use IO::Dir;
+use DBI;
 
 use vars qw($VERSION);
-$VERSION = '0.6';
+$VERSION = '0.9';
 
 # abstract connect() - should be overridden with a sub returning a valid $dbh
 sub connect
@@ -19,17 +22,11 @@ sub connect
     die "connect() is an abstract method that must be provided by a subclass";
 }
 
-sub _die
+sub _die 
 {
     my $self = shift;
-    $self->_disconnect;
+    $self->{dbh}->disconnect;
     die join ' ', @_;
-}
-
-sub _disconnect 
-{
-    my $self = shift;
-    $self->{dbh}->disconnect;           # unless $self->{test_mode};
 }
 
 # For subclassing to localise statements e.g. mysql grants in dev might need to
@@ -76,65 +73,58 @@ sub parse_args
     return @ARGV;
 }
 
-# Find outstanding deltas
+# Return a hashref containing the set of deltas we've already applied
+sub load_applied_deltas
+{
+    my $self = shift;
+
+    my $applied_dir = "$Bin/applied";
+    unless (-d $applied_dir) {
+        warn "No 'applied' directory found - creating\n";
+        make_path($applied_dir) or die "Directory create failed: $!\n";
+        return {};
+    }
+    die "Cannot write to directory '$applied_dir' - aborting\n" 
+        unless -w $applied_dir;
+    $self->{applied_dir} = $applied_dir;
+
+    my $loaded = {};
+    my $d = IO::Dir->new($applied_dir)
+        or die "Cannot read from applied directory '$applied_dir': $!\n";
+    while (defined (my $applied = $d->read)) {
+        next if $applied =~ m/^\./;
+        $applied = basename $applied;
+        $applied =~ s/\.sql$//;
+        $loaded->{$applied} = 1;
+    }
+
+    print "+ applied deltas: " . join(',', keys %$loaded) . "\n" if $self->{debug};
+
+    return $loaded;
+}
+
+# Find an array of outstanding delta filenames
 sub find_deltas
 {
     my $self = shift;
     my @delta = @_;
+    @delta = <*.sql> unless @delta;
 
-    @delta = <20*.sql> unless @delta;
     unless (@delta) {
-      $self->_disconnect;
-      print ("No deltas found (pattern '20*sql') - exiting.\n");
+      print ("No '*.sql' deltas found - exiting.\n");
       exit 0;
     }
     print "+ candidate deltas: " . join(',', @delta) . "\n" if $self->{debug};
 
     my @outstanding = ();
-    $self->{tag} = {};
-    $self->{file} = {};
-    $self->{tables} = {};
-    $self->{insert} = {};
     for my $d (@delta) {
-        my $fh = IO::File->new($d, 'r') or $self->_die("cannot open delta '$d': $!");
-        my $file;
-        if (defined $fh) {
-            local $/ = undef;
-            $file = <$fh>;
-            undef $fh;
-        }
-        if ($file =~ m!^(/\*|--).*?tag:\s*(\S+)!m) {
-            my $tag = $2;
-            if ($file =~ m!^(/\*|--).*?tables?:\s*(.*)!m) {
-                my $row = $self->{dbh}->selectrow_hashref(qq(
-                    select * from delta where delta_id = '$tag'
-                ));
-                if ($self->{debug}) {
-                    print "+ delta '$d' / '$tag' ";
-                    print "NOT " if ! ref $row;
-                    print "found\n";
-                }
-                if (! ref $row || $self->{force}) {
-                    my $table = $2;
-                    $table =~ s!\s+\*/.*!!;
-                    push @outstanding, $d;
-                    $self->{tag}->{$d} = $tag;
-                    $file =~ s/^--[^\n]*\n/\n/mg;
-                    $file =~ s/^\s*\n+//;
-                    $file =~ s/\n\s*\n+/\n/g;
-                    $self->{file}->{$d} = $file;
-                    $self->{tables}->{$d} = $table;
-                    $self->{insert}->{$d} = 1 unless ref $row;
-                }
-            }
-            else {
-                $self->_die("No table line found in file '$d'");
-            }
-        }
-        else {
-            $self->_die("No tag found in file '$d'");
+        my $name = $d;
+        $name =~ s/\.sql$//;
+        if ($self->{force} || ! exists $self->{applied}->{$name}) {
+            push @outstanding, $d;
         }
     }
+    print "+ oustanding deltas: " . join(',', @outstanding) . "\n" if $self->{debug};
 
     return @outstanding;
 }
@@ -143,11 +133,26 @@ sub find_deltas
 sub apply_deltas
 {
     my $self = shift;
-    my $dbh = $self->{dbh};
-    my @st = ();
 
+    # Connect to db
+    my $dbh = $self->{dbh} = $self->connect
+        or die "Database connect failed\n";
+
+    my @st = ();
     for my $d (@_) {
-        my $delta = $self->{file}->{$d};
+        # Load delta
+        my $fh = IO::File->new($d, 'r') or die("cannot open delta '$d': $!");
+        my $delta;
+        {
+            local $/ = undef;
+            $delta = <$fh>;
+        }
+
+        # Apply miscellaneous cleanups
+        $delta =~ s/^--[^\n]*\n/\n/mg;
+        $delta =~ s/^\s*\n+//;
+        $delta =~ s/\n\s*\n+/\n/g;
+
         # Escape semicolons inside single-quoted strings
         my @bits = split /(?<!\\)'/, $delta;
         printf "+ delta split into %d bits\n", scalar(@bits) if $self->{debug};
@@ -185,21 +190,13 @@ sub apply_deltas
             print "+ done\n" if $self->{debug} && ! $self->{noop};
         }
 
-        # Update the delta table
-        if ($self->{insert}->{$d} && $self->{update} && ! $self->{noop}) {
-            print "+ inserting delta record ... " if $self->{debug};
-            my $sth = $dbh->prepare(qq(
-                insert into delta (delta_id, delta_tables) values (?, ?)
-            ));
-            $self->_die("delta insert prepare failed: " . $dbh->errstr) 
-              unless $sth;
-
-            $sth->execute(
-                $self->{tag}->{$d}, 
-                $self->{tables}->{$d},
-            ) or $self->_die("delta insert execute failed: " . $dbh->errstr . 
-                "\n");
-
+        # Record that the delta has been applied
+        if ($self->{update} && ! $self->{noop}) {
+            print "+ creating applied entry ... " if $self->{debug};
+            my $filename = $self->{applied_dir} . '/' . $d;
+            $filename =~ s/\.sql$//;
+            IO::File->new($filename, 'w')
+                or die "Create of applied file '$filename' failed: $!";
             print "done\n" if $self->{debug};
         }
     }
@@ -223,9 +220,8 @@ sub run
     }
     @args = $self->parse_args(@args);
 
-    # Connect to db
-    $self->{dbh} = $self->connect;
-    die "invalid dbh handle" unless ref $self->{dbh};
+    # Load applied deltas
+    $self->{applied} = $self->load_applied_deltas;
 
     # Find outstanding deltas
     my @outstanding = $self->find_deltas(@args);
@@ -236,7 +232,6 @@ sub run
         else {
             print "No outstanding deltas found.\n";
         }
-        $self->_disconnect;
         return 0;
     }
 
@@ -252,8 +247,6 @@ sub run
 
     @return = $self->apply_deltas(@outstanding) 
       if $self->{update} || $self->{statements};
-
-    $self->_disconnect;
 
     return wantarray ? ( scalar(@return), \@return ) : scalar (@return);
 }
@@ -390,10 +383,11 @@ Gavin Carr <gavin@openfusion.com.au>
 
 =head1 LICENCE
 
-Copyright 2005-2008, Gavin Carr.
+Copyright 2005-2010, Gavin Carr.
 
 This program is free software. You may copy or redistribute it under the 
 same terms as perl itself.
 
 =cut
 
+# vim:sw=4
