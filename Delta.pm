@@ -264,18 +264,18 @@ containing arbitrary sql statements) to a database instance.
 
     # Must be used via a subclass providing a db connection e.g.
     package Foo::Delta;
-    use DBI;
     use base qw(DBIx::Delta);
+    use DBI;
     sub connect { 
-        DBI->connect('dbi:SQLite:dbname=foo.db','','');
+        DBI->connect('dbi:SQLite:dbname=foo.db');
     }
     1;
 
-    # Then in a delta run script (e.g. delta.pl):
+    # Then:
+    perl -MFoo::Delta -le 'Foo::Delta->run'
+    # Or create a delta run script (e.g. delta.pl):
     use Foo::Delta;
     Foo::Delta->run;
-
-    # And requires a 'delta' table to track changes (see below)
 
     # Then to check for deltas that have not been applied
     ./delta.pl 
@@ -295,54 +295,21 @@ It is simple and only requires DBI/DBD for your database connectivity.
 
 =head2 DELTAS
 
-Deltas are files containing arbitrary sql statements, identified by a 
-unique per-file tag. DBIx::Delta tracks which delta files have been 
-applied by means of a special 'delta' table, and will apply (execute) 
-any deltas that are outstanding against your database.
+Deltas are just '*.sql' files containing arbitrary sql statements. 
+Any deltas that haven't been seen before are executed against your
+database, and if successful, the filename is recorded in an 'applied'
+directory, and those deltas are thereafter ignored. 
 
-DBIx::Delta files contain series of SQL statements to apply in the 
-database, and must also contain two additional metadata fields within 
-SQL comments, having the form 'key: value'. The first is a unique 
-identifier to be used as the delta_id, whose key may be anything ending
-in 'tag' e.g. 'tag', 'delta-tag' etc.; the second is a description of the 
-tables affected by this delta, whose key should be 'table' or 'tables'
-'tables' e.g.
-
-    -- tag: 666da042-676e-4026-9862-6e7e0a1d3fa0
-    -- table: listing
-
-or:
-
-    -- delta-tag: 7ae84801-e323-4a6f-984e-6de4f939a12c
-    -- tables: emp, emp_address
-
-DBIx::Delta tracks uses the tag identifier to track which delta files 
-have been applied by inserting a record into a special 'delta' table 
-that must exist in the database, with the following structure (SQLite):
-
-    -- Create/bootstrap delta table (SQLite)
-    create table delta (
-      delta_id 	        varchar primary key,
-      delta_tables	    varchar not null,
-      delta_apply_ts	timestamp default CURRENT_TIMESTAMP
-    );
-
-and similarly, for mysql or postgresql:
-
-    -- Create/bootstrap delta table (mysql/postgresql)
-    create table delta (
-        delta_id        varchar(100) primary key,
-        delta_tables    varchar(255) not null,
-        delta_apply_ts  timestamp default now()
-    );
-
+This means that you can't change or add to a delta after it has been
+applied to the database. Changes to existing database objects should 
+be done via new deltas using appropriate 'ALTER' commands.
 
 =head2 USAGE
 
     # Must be used via a subclass providing a db connection e.g.
     package Foo::Delta;
-    use DBI;
     use base qw(DBIx::Delta);
+    use DBI;
     sub connect { 
         DBI->connect('dbi:SQLite:dbname=foo.db','','');
     }
