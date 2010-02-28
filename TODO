@@ -1,3 +1,3 @@
-- convert to use new build foo
-- update manifest
-- add perldoc and perldoc coverage tests
+- convert from db-based to file-based (an 'applied' directory within $Bin)
+- track via filenames, instead of tags
+- lose requirement for a table identifier
