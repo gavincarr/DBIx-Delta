@@ -14,12 +14,18 @@ use IO::Dir;
 use DBI;
 
 use vars qw($VERSION);
-$VERSION = '0.9';
+$VERSION = '0.9.1';
 
 # abstract connect() - should be overridden with a sub returning a valid $dbh
 sub connect
 {
     die "connect() is an abstract method that must be provided by a subclass";
+}
+
+# Return a string for the environment if you want to distinguish prod/test etc.
+sub environment
+{
+    return '';
 }
 
 sub _die 
@@ -78,7 +84,10 @@ sub load_applied_deltas
 {
     my $self = shift;
 
-    my $applied_dir = "$Bin/applied";
+    my $env = $self->environment;
+    $env = "_$env" if $env;
+
+    my $applied_dir = "$Bin/applied$env";
     unless (-d $applied_dir) {
         warn "No 'applied' directory found - creating\n";
         make_path($applied_dir) or die "Directory create failed: $!\n";
