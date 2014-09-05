@@ -1,5 +1,5 @@
 #
-# Package to apply outstanding database deltas to a database instance.
+# Perl module for applying incremental database deltas/migrations to a database
 #
 
 package DBIx::Delta;
@@ -14,7 +14,7 @@ use IO::Dir;
 use DBI;
 
 use vars qw($VERSION);
-$VERSION = '0.9.1';
+$VERSION = '1.0.0';
 
 # abstract connect() - should be overridden with a sub returning a valid $dbh
 sub connect
@@ -266,8 +266,8 @@ __END__
 
 =head1 NAME
 
-DBIx::Delta - a module to apply outstanding database deltas (files 
-containing arbitrary sql statements) to a database instance.
+DBIx::Delta - a module for applying outstanding database deltas
+(migrations) to a database instance.
 
 =head1 SYNOPSIS
 
@@ -294,24 +294,27 @@ containing arbitrary sql statements) to a database instance.
 
 =head1 DESCRIPTION
 
-DBIx::Delta is a module used to apply database deltas (changes) to a 
-database instance. It is intended for use in maintaining multiple 
-database schemas in sync e.g. you create deltas on your development 
-database instance, and subsequently apply those deltas to your test
-instance, and then finally to production. 
+DBIx::Delta is a module used to apply database deltas (migrations) to a 
+database instance.
+
+It is intended for use in maintaining multiple database schemas in sync
+e.g. you create deltas on your development database instance, and
+subsequently apply those deltas to your test instance, and then finally
+to production.
 
 It is simple and only requires DBI/DBD for your database connectivity.
 
 =head2 DELTAS
 
-Deltas are just '*.sql' files containing arbitrary sql statements. 
-Any deltas that haven't been seen before are executed against your
-database, and if successful, the filename is recorded in an 'applied'
-directory, and those deltas are thereafter ignored. 
+Deltas are just '*.sql' files containing arbitrary sql statements, in
+your current directory. Any deltas that haven't been seen before are
+executed against your database, and if successful, the filename is
+recorded in an 'applied' subdirectory, and those deltas are thereafter
+ignored. 
 
 This means that you can't change or add to a delta after it has been
-applied to the database. Changes to existing database objects should 
-be done via new deltas using appropriate 'ALTER' commands.
+applied to the database. Changes to existing database objects must be 
+done via new deltas using appropriate 'ALTER' commands.
 
 =head2 USAGE
 
@@ -359,7 +362,7 @@ Gavin Carr <gavin@openfusion.com.au>
 
 =head1 LICENCE
 
-Copyright 2005-2010, Gavin Carr.
+Copyright 2005-2014, Gavin Carr.
 
 This program is free software. You may copy or redistribute it under the 
 same terms as perl itself.

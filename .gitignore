@@ -1,9 +1,12 @@
 .*.sw?
 blib*
 pm_to_blib*
+DBIx-Delta*
+.build
 Makefile
 Makefile.old
 Build
 Build.bat
 MANIFEST.bak
+MYMETA.*
 TODO
