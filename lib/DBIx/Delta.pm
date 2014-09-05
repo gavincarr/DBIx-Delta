@@ -267,7 +267,7 @@ __END__
 =head1 NAME
 
 DBIx::Delta - a module for applying outstanding database deltas
-(migrations) to a database instance.
+(migrations) to a database instance
 
 =head1 SYNOPSIS
 
